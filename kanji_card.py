@@ -6,6 +6,8 @@
 #from aqt.qt import *
 
 import re
+import anki.stdmodels
+import aqt
 
 class AnnotatedTextBlock(object):
     def __init__(self, text, annotation):
@@ -13,7 +15,7 @@ class AnnotatedTextBlock(object):
         self.annotation = annotation
 
     def html(self):
-        return '<ruby>{0}<rt>{1}</ruby>'.format(self.text, self.annotation)
+        return u"<ruby>{0}<rt>{1}</ruby>".format(self.text, self.annotation)
 
 
 class PlainTextBlock(object):
@@ -38,7 +40,7 @@ class Text(object):
         block_strings = []
         for block in self.blocks:
             block_strings.append(block.html())
-        return ''.join(block_strings)
+        return u"".join(block_strings)
 
 
 class ReadingExample(object):
@@ -47,7 +49,7 @@ class ReadingExample(object):
         self.translation = translation
 
     def html(self):
-        return self.word.html() + '&emsp;' + self.translation.html()
+        return self.word.html() + u"&emsp;" + self.translation.html()
 
 
 class ReadingWithExamples(object):
@@ -60,28 +62,28 @@ class ReadingWithExamples(object):
 
     def html(self):
         if not self.examples:
-            self.examples.append(ReadingExample('', ''))
+            self.examples.append(ReadingExample(u"", u""))
 
         strings = []
         def write_table_row(first, second):
-            strings.append('  <tr>')
-            strings.append('    <td>{}</td>'.format(first))
-            strings.append('    <td>{}</td>'.format(second))
-            strings.append('  </tr>')
+            strings.append(u"  <tr>")
+            strings.append(u"    <td>{}</td>".format(first))
+            strings.append(u"    <td>{}</td>".format(second))
+            strings.append(u"  </tr>")
 
         write_table_row(self.reading, self.examples[0].html())
 
         for example in self.examples[1:]:
-            write_table_row('', example.html())
+            write_table_row(u"", example.html())
 
-        return '\n'.join(strings)
+        return u"\n".join(strings)
 
 
 def parse_text(source):
     text = Text()
 
     while True:
-        first_annotation_index = source.find('[')
+        first_annotation_index = source.find(u"[")
         if first_annotation_index == -1:
             text.add_plain_text(source)
             break
@@ -91,10 +93,11 @@ def parse_text(source):
             source = source[first_annotation_index:]
             continue
 
-        separator_index = source.find('|')
-        end_index = source.find(']')
+        separator_index = source.find(u"|")
+        end_index = source.find(u"]")
         if not (separator_index > 0 and end_index > separator_index):
-            raise RuntimeError('bad annotation: {}'.format(source))
+            raise RuntimeError(
+                "bad annotation: {}".format(source.encode("utf-8")))
 
         plain_text = source[1:separator_index]
         annotation = source[separator_index+1:end_index]
@@ -117,7 +120,7 @@ class ReadingsBuilder(object):
     def add_example(self, word, translation):
         if self.current_reading is None:
             raise RuntimeError(
-                'ReadingsBuilder: add_example called before set_reading')
+                "ReadingsBuilder: add_example called before set_reading")
 
         word_text = parse_text(word)
         translation_text = parse_text(translation)
@@ -128,11 +131,20 @@ class ReadingsBuilder(object):
             self.readings.append(self.current_reading)
 
         strings = []
-        strings.append('<table>')
+        strings.append(u"<table>")
         for reading in self.readings:
             strings.append(reading.html())
-        strings.append('</table>')
-        return '\n'.join(strings)
+        strings.append(u"</table>")
+        return u"\n".join(strings)
+
+
+def replace_html(string):
+    open_tag_re = ur"<[^>]*>"
+    close_tag_re = ur"</[^>]*>"
+
+    string = re.sub(open_tag_re, u"\n", string)
+    string = re.sub(close_tag_re, u"", string)
+    return string
 
 
 def convert(source):
@@ -140,32 +152,83 @@ def convert(source):
 
     builder = ReadingsBuilder()
     for line in lines:
-        match = re.match(r'^\s*(.*\S+)\s*:\s*$', line)
+        line = line.rstrip()
+
+        # Skip empty lines
+        match = re.match(ur"^\s*$", line)
+        if match:
+            continue
+
+        match = re.match(ur"^\s*(.*\S+)\s*:\s*$", line)
         if match:
             builder.set_reading(match.group(1))
             continue
 
-        match = re.match(r'^\s*\*\s*(.*\S+)\s*-\s*(.*\S+)\s*$', line)
+        match = re.match(ur"^\s*\*\s*(.*\S+)\s*-\s*(.*\S+)\s*$", line)
         if match:
             word, translation = match.group(1), match.group(2)
             builder.add_example(word, translation)
             continue
 
-        raise RuntimeError('unexpected line: {}'.format(line))
+        raise RuntimeError("unexpected line: {}".format(line.encode("utf-8")))
 
     return builder.html()
 
 
+def add_kanji_card_model(col):
+    models = col.models
+    kanji_card_model = models.new(u"Kanji Card")
+
+    models.addField(kanji_card_model, models.newField(u"Kanji"))
+    models.addField(kanji_card_model, models.newField(u"Meaning"))
+    models.addField(kanji_card_model, models.newField(u"Readings"))
+    models.addField(kanji_card_model, models.newField(u"ProcessedReadings"))
+
+    kanji_card_model["css"] += u"""\
+.jp { font-size: 30px }
+.win .jp { font-family: "MS Mincho", "ＭＳ 明朝"; }
+.mac .jp { font-family: "Hiragino Mincho Pro", "ヒラギノ明朝 Pro"; }
+.linux .jp { font-family: "Kochi Mincho", "東風明朝"; }
+.mobile .jp { font-family: "Hiragino Mincho ProN"; }"""
+
+    template = models.newTemplate(u"Recognition")
+    template["qfmt"] = u"""\
+<div class=jp> {{Kanji}} </div>"""
+    template["afmt"] = u"""\
+{{FrontSide}}
+
+<hr id=answer>
+
+<div>
+    {{ProcessedReadings}}
+</div>"""
+    models.addTemplate(kanji_card_model, template)
+
+    models.add(kanji_card_model)
+
+    return kanji_card_model
 
 
-if __name__ == '__main__':
-    input_unicode_string = u"""ジョ :
-* [女|じょ][性|せい] - женщина
-* [彼女|かのじょ] - она
-おんな :
-* [女|おんな] - женщина
-* [女|おんな]の[子|こ] - девочка
-"""
-    input_raw_string = input_unicode_string.encode('utf-8')
+def focus_lost_hook(flag, note, field_index):
+    source_field = u"Readings"
+    target_field = u"ProcessedReadings"
 
-    print(convert(input_raw_string))
+    # Check necessary fields are present
+    fields = aqt.mw.col.models.fieldNames(note.model())
+    if source_field not in fields or target_field not in fields:
+        return flag
+
+    # Check that source field lost focus
+    if fields[field_index] != source_field:
+        return flag
+
+    source_text = note[source_field]
+    raw_text = replace_html(source_text)
+    target_text = convert(raw_text)
+
+    note[target_field] = target_text
+    return True    
+
+
+anki.stdmodels.models.append(("Kanji Card", add_kanji_card_model))
+anki.hooks.addHook("editFocusLost", focus_lost_hook)
