@@ -83,18 +83,21 @@ def parse_text(source):
     text = Text()
 
     while True:
-        first_annotation_index = source.find(u"[")
-        if first_annotation_index == -1:
+        open_brace_search = re.search(ur"[\[｛]", source)
+        if not open_brace_search:
             text.add_plain_text(source)
             break
 
-        if first_annotation_index > 0:
-            text.add_plain_text(source[:first_annotation_index])
-            source = source[first_annotation_index:]
+        open_brace_index = open_brace_search.start()
+        if open_brace_index > 0:
+            text.add_plain_text(source[:open_brace_index])
+            source = source[open_brace_index:]
             continue
 
-        separator_index = source.find(u"|")
-        end_index = source.find(u"]")
+        separator_search = re.search(ur"[\|｜]", source)
+        separator_index = -1 if not separator_search else separator_search.start()
+        end_search = re.search(ur"[\]｝]", source)
+        end_index = -1 if not end_search else end_search.start()
         if not (separator_index > 0 and end_index > separator_index):
             raise RuntimeError(
                 "bad annotation: {}".format(source.encode("utf-8")))
@@ -159,12 +162,12 @@ def convert(source):
         if match:
             continue
 
-        match = re.match(ur"^\s*(.*\S+)\s*:\s*$", line)
+        match = re.match(ur"^\s*(.*\S+)\s*[:：]\s*$", line)
         if match:
             builder.set_reading(match.group(1))
             continue
 
-        match = re.match(ur"^\s*\*\s*(.*\S+)\s*-\s*(.*\S+)\s*$", line)
+        match = re.match(ur"^\s*[\*＊]\s*(.*\S+)\s*-\s*(.*\S+)\s*$", line)
         if match:
             word, translation = match.group(1), match.group(2)
             builder.add_example(word, translation)
